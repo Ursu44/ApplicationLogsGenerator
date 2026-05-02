@@ -1,65 +1,133 @@
 import random
-import uuid
-import time
+from utils import random_ip, random_user, random_request_id, is_attack_wave
 from datetime import datetime, timezone
 
-# ── Attack Wave State ─────────────────────────────────────────────
-_attack_state = {
-    "in_attack":   False,
-    "attack_end":  0.0,
-    "next_attack": time.time() + random.randint(120, 300),
-}
 
-def is_attack_wave() -> bool:
-    now   = time.time()
-    state = _attack_state
+def web_log(malicious=False):
+    methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 
-    if state["in_attack"]:
-        if now < state["attack_end"]:
-            return random.random() < 0.90
-        else:
-            state["in_attack"]   = False
-            state["next_attack"] = now + random.randint(180, 480)
-            print(
-                f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
-                f"⚔️  Attack wave terminat. "
-                f"Următor în {int(state['next_attack'] - now)}s"
-            )
-            return random.random() < 0.08
-    else:
-        if now >= state["next_attack"]:
-            duration            = random.randint(30, 90)
-            state["in_attack"]  = True
-            state["attack_end"] = now + duration
-            print(
-                f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
-                f"🚨 Attack wave START — durată {duration}s"
-            )
-            return random.random() < 0.90
-        else:
-            return random.random() < 0.08
-
-
-def random_ip():
-    private_ranges = [
-        lambda: f"172.{random.randint(16,27)}.{random.randint(0,25)}.{random.randint(1,25)}",
-        lambda: f"192.168.{random.randint(0,25)}.{random.randint(1,25)}"
+    good_paths = [
+        "/", "/login", "/logout", "/dashboard", "/api/data",
+        "/profile", "/settings", "/search?q=test",
+        "/reports/2024", "/health"
     ]
-    public_ranges = [
-        lambda: f"31.{random.randint(0,25)}.{random.randint(0,255)}.{random.randint(0,25)}",
-        lambda: f"52.{random.randint(0,25)}.{random.randint(0,25)}.{random.randint(0,25)}"
+    bad_paths = [
+        "/login?u=admin'--",
+        "/?id=1 OR 1=1",
+        "/<script>alert(1)</script>",
+        "/../../etc/passwd",
+        "/admin.php",
+        "/wp-admin",
+        "/api/data?debug=true",
+        "/cgi-bin/test.cgi"
     ]
-    return random.choice(private_ranges + public_ranges)()
+
+    status_good = [200, 200, 200, 302, 304]
+    status_bad  = [400, 401, 403, 404, 500, 502]
+
+    timestamp = datetime.now(timezone.utc).strftime("%d/%b/%Y:%H:%M:%S +0000")
+    path      = random.choice(bad_paths if malicious else good_paths)
+    status    = random.choice(status_bad if malicious else status_good)
+
+    return (
+        f'{random_ip()} - {random_user()} '
+        f'[{timestamp}] '
+        f'"{random.choice(methods)} {path} HTTP/1.1" '
+        f'{status} {random.randint(200, 6000)}'
+    )
 
 
-def random_user():
-    users = [
-        "admin", "root", "user1", "user2",
-        "service", "backup", "test",
-        "guest", "support"
+def api_log(malicious=False):
+    good_messages = [
+        "Request processed successfully",
+        "Token validated",
+        "Cache hit",
+        "User session refreshed",
+        "Configuration loaded",
+        "Rate limit OK"
     ]
-    return random.choice(users)
+    bad_messages = [
+        "Broken authentication attempt",
+        "API rate limit exceeded",
+        "Excessive requests detected",
+        "Invalid token signature",
+        "Unauthorized access attempt",
+        "Malformed request payload"
+    ]
+
+    level     = "WARN" if malicious else "INFO"
+    message   = random.choice(bad_messages if malicious else good_messages)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return (
+        f"{timestamp} {level} API - {message} "
+        f"user={random_user()} ip={random_ip()} "
+        f"request_id={random_request_id()}"
+    )
 
 
-def random_request_id():
-    return f"req-{uuid.uuid4().hex[:12]}"
+def file_upload_log(malicious=False):
+    good_files = [
+        "report.pdf", "image.png", "data.csv", "avatar.jpg",
+        "invoice.xlsx", "presentation.pptx", "notes.txt"
+    ]
+    bad_files = [
+        "shell.php", "payload.jsp", "backdoor.py", "cmd.aspx",
+        "webshell.jsp", "rev.ps1", "dropper.exe"
+    ]
+
+    file      = random.choice(bad_files if malicious else good_files)
+    level     = "WARN" if malicious else "INFO"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return (
+        f"{timestamp} {level} App - File uploaded "
+        f"file={file} user={random_user()} "
+        f"request_id={random_request_id()}"
+    )
+
+
+def exception_log(malicious=False):
+    common_exceptions = [
+        "TypeError", "ValueError",
+        "TimeoutError", "KeyError", "ConnectionError"
+    ]
+    severe_exceptions = [
+        "DatabaseTimeoutException",
+        "UnauthorizedAccessException",
+        "IntegrityConstraintViolation",
+        "RemoteCodeExecutionException"
+    ]
+
+    level     = "ERROR" if malicious else "WARN"
+    exception = random.choice(
+        severe_exceptions if malicious else common_exceptions
+    )
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return (
+        f"{timestamp} {level} App - Unhandled exception "
+        f"{exception} user={random_user()} "
+        f"request_id={random_request_id()}"
+    )
+
+
+_generator_index = 0
+
+
+def generate():
+    global _generator_index
+
+    malicious = is_attack_wave()
+
+    generators = [
+        lambda: web_log(malicious),
+        lambda: api_log(malicious),
+        lambda: file_upload_log(malicious),
+        lambda: exception_log(malicious)
+    ]
+
+    log = generators[_generator_index]()
+    _generator_index = (_generator_index + 1) % len(generators)
+
+    return log
